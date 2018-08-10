@@ -15,23 +15,6 @@
  */
 package com.netflix.conductor.service;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.Collectors;
-
-import javax.inject.Inject;
-import javax.inject.Singleton;
-
-import com.netflix.conductor.core.execution.ApplicationException;
-import com.netflix.conductor.service.utils.ServiceUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.netflix.conductor.annotations.Trace;
 import com.netflix.conductor.common.metadata.events.EventExecution;
 import com.netflix.conductor.common.metadata.tasks.PollData;
@@ -40,12 +23,17 @@ import com.netflix.conductor.common.metadata.tasks.Task.Status;
 import com.netflix.conductor.common.metadata.tasks.TaskExecLog;
 import com.netflix.conductor.common.metadata.tasks.TaskResult;
 import com.netflix.conductor.common.metadata.workflow.WorkflowDef;
+import com.netflix.conductor.common.run.ExternalStorageLocation;
 import com.netflix.conductor.common.run.SearchResult;
 import com.netflix.conductor.common.run.TaskSummary;
 import com.netflix.conductor.common.run.Workflow;
 import com.netflix.conductor.common.run.WorkflowSummary;
+import com.netflix.conductor.common.utils.ExternalPayloadStorage;
+import com.netflix.conductor.common.utils.ExternalPayloadStorage.Operation;
+import com.netflix.conductor.common.utils.ExternalPayloadStorage.PayloadType;
 import com.netflix.conductor.core.config.Configuration;
 import com.netflix.conductor.core.events.queue.Message;
+import com.netflix.conductor.core.execution.ApplicationException;
 import com.netflix.conductor.core.execution.SystemTaskType;
 import com.netflix.conductor.core.execution.WorkflowExecutor;
 import com.netflix.conductor.core.utils.QueueUtils;
@@ -54,8 +42,22 @@ import com.netflix.conductor.dao.IndexDAO;
 import com.netflix.conductor.dao.MetadataDAO;
 import com.netflix.conductor.dao.QueueDAO;
 import com.netflix.conductor.metrics.Monitors;
+import com.netflix.conductor.service.utils.ServiceUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  *
@@ -83,6 +85,8 @@ public class ExecutionService {
 
     private final int maxSearchSize;
 
+    private final ExternalPayloadStorage externalPayloadStorage;
+
     private static final int MAX_POLL_TIMEOUT_MS = 5000;
 
     private static final int POLL_COUNT_ONE = 1;
@@ -90,12 +94,13 @@ public class ExecutionService {
     private static final int POLLING_TIMEOUT_IN_MS = 100;
 
 	@Inject
-	public ExecutionService(WorkflowExecutor wfProvider, ExecutionDAO executionDAO, QueueDAO queueDAO, MetadataDAO metadataDAO, IndexDAO indexDAO, Configuration config) {
+	public ExecutionService(WorkflowExecutor wfProvider, ExecutionDAO executionDAO, QueueDAO queueDAO, MetadataDAO metadataDAO, IndexDAO indexDAO, Configuration config, ExternalPayloadStorage externalPayloadStorage) {
 		this.workflowExecutor = wfProvider;
 		this.executionDAO = executionDAO;
 		this.queueDAO = queueDAO;
 		this.metadataDAO = metadataDAO;
 		this.indexDAO = indexDAO;
+		this.externalPayloadStorage = externalPayloadStorage;
 		this.taskRequeueTimeout = config.getIntProperty("task.requeue.timeout", 60_000);
         this.maxSearchSize = config.getIntProperty("workflow.max.search.size", 5_000);
 	}
@@ -342,13 +347,13 @@ public class ExecutionService {
 			try {
 				return new WorkflowSummary(executionDAO.getWorkflow(workflowId,false));
 			} catch(Exception e) {
-				logger.error(e.getMessage(), e);
+				logger.error("Error fetching workflow by id: {}", workflowId, e);
 				return null;
 			}
 		}).filter(Objects::nonNull).collect(Collectors.toList());
 		int missing = result.getResults().size() - workflows.size();
 		long totalHits = result.getTotalHits() - missing;
-		return new SearchResult<WorkflowSummary>(totalHits, workflows);
+		return new SearchResult<>(totalHits, workflows);
 	}
 
 	public SearchResult<WorkflowSummary> searchWorkflowByTasks(String query, String freeText, int start, int size, List<String> sortOptions) {
@@ -360,7 +365,7 @@ public class ExecutionService {
 						String workflowId = taskSummary.getWorkflowId();
 						return new WorkflowSummary(executionDAO.getWorkflow(workflowId, false));
 					} catch (Exception e) {
-						logger.error("Error fetching workflow by id: ", e);
+						logger.error("Error fetching workflow by id: {}", taskSummary.getWorkflowId(), e);
 						return null;
 					}
 				})
@@ -445,4 +450,14 @@ public class ExecutionService {
 		return indexDAO.getTaskExecutionLogs(taskId);
 	}
 
+    /**
+     * Get external uri for the payload
+     *
+     * @param operation the type of {@link Operation} to be performed
+     * @param payloadType the {@link PayloadType} at the external uri
+     * @return the external uri at which the payload is stored/to be stored
+     */
+	public ExternalStorageLocation getPayloadUri(Operation operation, PayloadType payloadType) {
+		return externalPayloadStorage.getExternalUri(operation, payloadType);
+	}
 }
