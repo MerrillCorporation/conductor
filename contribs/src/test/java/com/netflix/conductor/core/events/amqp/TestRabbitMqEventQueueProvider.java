@@ -22,7 +22,7 @@ public class TestRabbitMqEventQueueProvider {
         when(mockConnectionFactory.newConnection()).thenReturn(mockConnection);
         when(mockConnection.createChannel()).thenReturn(mockChannel);
 
-        RabbitMqEventQueueProvider provider = new RabbitMqEventQueueProvider(mockConnectionFactory, "");
+        RabbitMqEventQueueProvider provider = new RabbitMqEventQueueProvider(mockConnectionFactory, "exchange", "#", "queue");
         ObservableQueue observableQueue = provider.getQueue("");
         assertNotNull(observableQueue);
         assertTrue(observableQueue instanceof RabbitMqObservableQueue);

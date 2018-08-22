@@ -12,8 +12,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static com.rabbitmq.client.AMQP.*;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -36,6 +39,8 @@ public class TestRabbitMqObservableQueue {
         observableQueue = new RabbitMqObservableQueue(
                 mockConnectionFactory,
                 "amqp://user:pass@rabbitmq.com",
+                "exchange",
+                "routingKey",
                 "zebra");
     }
 
@@ -82,6 +87,65 @@ public class TestRabbitMqObservableQueue {
         verify(mockChannel).basicAck(3, false);
 
         assertEquals(2, failures.size());
+    }
+
+    @Test
+    public void testPublishSuccess() throws Exception {
+        List<Message> messages = new ArrayList<>();
+        Message message1 = new Message("id1", "body1", "1");
+        Message message2 = new Message("id2", "body2", "2");
+        messages.add(message1);
+        messages.add(message2);
+
+        observableQueue.publish(messages);
+
+        BasicProperties expectedProperties1 = new BasicProperties.Builder()
+                .messageId(message1.getId())
+                .build();
+
+        BasicProperties expectedProperties2 = new BasicProperties.Builder()
+                .messageId(message2.getId())
+                .build();
+
+        verify(mockChannel).basicPublish(
+                eq("exchange"),
+                eq("routingKey"),
+                any(BasicProperties.class),
+                eq(message1.getPayload().getBytes()));
+        verify(mockChannel).basicPublish(
+                eq("exchange"),
+                eq("routingKey"),
+                any(BasicProperties.class),
+                eq(message2.getPayload().getBytes()));
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testPublishFailure() throws Exception {
+        List<Message> messages = new ArrayList<>();
+        Message message1 = new Message("id1", "body1", "1");
+        Message message2 = new Message("id2", "body2", "2");
+        messages.add(message1);
+        messages.add(message2);
+
+        observableQueue.publish(messages);
+
+        doThrow(new IOException())
+                .when(mockChannel).basicPublish(
+                        eq("exchange"),
+                        eq("routingKey"),
+                        any(BasicProperties.class),
+                        eq(message1.getPayload().getBytes()));
+
+        verify(mockChannel).basicPublish(
+                eq("exchange"),
+                eq("routingKey"),
+                any(BasicProperties.class),
+                eq(message1.getPayload().getBytes()));
+        verify(mockChannel).basicPublish(
+                eq("exchange"),
+                eq("routingKey"),
+                any(BasicProperties.class),
+                eq(message2.getPayload().getBytes()));
     }
 
     @Test
