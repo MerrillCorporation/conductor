@@ -4,6 +4,7 @@ dependencies {
 	compile project(':conductor-core')
 
 	compile 'com.amazonaws:aws-java-sdk-sqs:latest.release'
+	compile 'com.rabbitmq:amqp-client:5.3.0'
 	compile "com.google.inject:guice:${revGuice}"
 
 	compile "net.thisptr:jackson-jq:${revJq}"
